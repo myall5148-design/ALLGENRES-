@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "PopupSettings": {
+      "title": "PopupSettings",
+      "description": "Welcome pop-up and Monetag Smart Link configuration settings managed by the admin",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "description": "Whether the welcome popup is enabled" },
+        "heading": { "type": "string", "maxLength": 100, "description": "Popup heading text" },
+        "buttonText": { "type": "string", "maxLength": 50, "description": "Popup button text" },
+        "bgColor": { "type": "string", "maxLength": 50, "description": "Popup background color" },
+        "buttonColor": { "type": "string", "maxLength": 50, "description": "Button color" },
+        "bgImageUrl": { "type": "string", "maxLength": 500, "description": "Background image URL" },
+        "monetagUrl": { "type": "string", "maxLength": 500, "description": "Monetag Smart Link URL" },
+        "showFrequency": { "type": "string", "enum": ["every_visit", "once_per_visitor"], "description": "Show frequency" },
+        "isCloseable": { "type": "boolean", "description": "Whether visitors can close the popup" },
+        "buttonBehavior": { "type": "string", "enum": ["open_monetag_and_continue", "direct_link"], "description": "Button behavior" }
+      },
+      "required": ["enabled", "heading", "buttonText", "monetagUrl"]
+    },
+    "Article": {
+      "title": "Article",
+      "description": "Music news article",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200 },
+        "slug": { "type": "string", "maxLength": 200 },
+        "excerpt": { "type": "string", "maxLength": 500 },
+        "content": { "type": "string", "maxLength": 5000 },
+        "country": { "type": "string", "maxLength": 50 },
+        "genre": { "type": "string", "maxLength": 50 },
+        "category": { "type": "string", "maxLength": 50 },
+        "author": { "type": "string", "maxLength": 100 },
+        "sourceName": { "type": "string", "maxLength": 100 },
+        "sourceUrl": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string", "maxLength": 500 },
+        "publishedAt": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "enum": ["published", "pending"] },
+        "likes": { "type": "integer" }
+      },
+      "required": ["title", "excerpt", "content", "country", "category"]
+    },
+    "Artist": {
+      "title": "Artist",
+      "description": "Artist profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "country": { "type": "string", "maxLength": 50 },
+        "genre": { "type": "string", "maxLength": 50 },
+        "bio": { "type": "string", "maxLength": 2000 },
+        "image": { "type": "string", "maxLength": 500 },
+        "monthlyListeners": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["name", "country", "genre"]
+    }
+  },
+  "firestore": {
+    "/settings/popup": {
+      "schema": "$Ref:entities/PopupSettings",
+      "description": "Global welcome popup settings"
+    },
+    "/articles/{articleId}": {
+      "schema": "$Ref:entities/Article",
+      "description": "News articles collection"
+    },
+    "/artists/{artistId}": {
+      "schema": "$Ref:entities/Artist",
+      "description": "Artists collection"
+    }
+  }
+}

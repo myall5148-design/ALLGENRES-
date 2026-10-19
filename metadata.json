@@ -1,0 +1,6 @@
+{
+  "name": "SoundPulse USA UK CA",
+  "description": "Professional music and entertainment news platform featuring artists from the USA, UK, and Canada with AI-powered news discovery, artist directory, new releases, and admin management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
