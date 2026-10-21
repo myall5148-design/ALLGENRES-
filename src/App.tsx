@@ -43,42 +43,7 @@ import {
 import { auth, db, googleProvider } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-
-interface Artist {
-  id: string;
-  name: string;
-  country: string;
-  genre: string;
-  bio: string;
-  image: string;
-  spotifyUrl: string;
-  instagramUrl: string;
-  youtubeUrl: string;
-  monthlyListeners: string;
-  latestRelease: string;
-  notableSongs?: string[];
-  sources?: string[];
-}
-
-interface Article {
-  id: string;
-  title: string;
-  slug: string;
-  excerpt: string;
-  content: string;
-  country: "USA" | "UK" | "Canada" | "Global";
-  genre: string;
-  category: "Music News" | "New Releases" | "Interviews" | "Concerts" | "Entertainment" | "Biographies";
-  author: string;
-  sourceName: string;
-  sourceUrl: string;
-  imageUrl: string;
-  publishedAt: string;
-  status: "published" | "pending";
-  featured?: boolean;
-  likes: number;
-  tags: string[];
-}
+import { INITIAL_ARTISTS, INITIAL_ARTICLES, Artist, Article } from "./data/artistsData";
 
 interface PopupSettings {
   enabled: boolean;
@@ -111,9 +76,9 @@ const PAGE_SIZE = 16;
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<"home" | "artists" | "usa" | "uk" | "canada" | "releases" | "admin">("artists");
-  const [artists, setArtists] = useState<Artist[]>([]);
-  const [articles, setArticles] = useState<Article[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [artists, setArtists] = useState<Artist[]>(INITIAL_ARTISTS);
+  const [articles, setArticles] = useState<Article[]>(INITIAL_ARTICLES);
+  const [loading, setLoading] = useState<boolean>(false);
   const [discovering, setDiscovering] = useState<boolean>(false);
   const [discoverMessage, setDiscoverMessage] = useState<string>("");
 
@@ -152,28 +117,45 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      setLoading(true);
-      const [artRes, newsRes] = await Promise.all([
-        fetch("/api/artists"),
-        fetch("/api/news")
-      ]);
-      const artistsData = await artRes.json();
-      const newsData = await newsRes.json();
-      setArtists(artistsData);
-      setArticles(newsData);
+      // Ensure local INITIAL_ARTISTS are loaded immediately
+      let loadedArtists = [...INITIAL_ARTISTS];
+      let loadedArticles = [...INITIAL_ARTICLES];
+
+      try {
+        const artRes = await fetch("/api/artists");
+        if (artRes.ok) {
+          const remoteArtists = await artRes.json();
+          if (Array.isArray(remoteArtists) && remoteArtists.length > 0) {
+            loadedArtists = remoteArtists;
+          }
+        }
+      } catch (e) {
+        // Fallback for static hosting (Netlify)
+      }
+
+      try {
+        const newsRes = await fetch("/api/news");
+        if (newsRes.ok) {
+          const remoteNews = await newsRes.json();
+          if (Array.isArray(remoteNews) && remoteNews.length > 0) {
+            loadedArticles = remoteNews;
+          }
+        }
+      } catch (e) {
+        // Fallback for static hosting
+      }
+
+      setArtists(loadedArtists);
+      setArticles(loadedArticles);
 
       const popupDocRef = doc(db, "settings", "popup");
       const popupSnap = await getDoc(popupDocRef);
       if (popupSnap.exists()) {
         const data = popupSnap.data() as PopupSettings;
         setPopupSettings({ ...DEFAULT_POPUP_SETTINGS, ...data });
-      } else {
-        await setDoc(popupDocRef, DEFAULT_POPUP_SETTINGS);
       }
     } catch (err) {
       console.error("Failed to fetch data:", err);
-    } finally {
-      setLoading(false);
     }
   };
 
