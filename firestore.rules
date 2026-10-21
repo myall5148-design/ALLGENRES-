@@ -16,7 +16,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    match /settings/popup {
+    match /settings/{settingId} {
       allow read: if true;
       allow write: if isAdmin();
     }

@@ -1,6 +1,7 @@
 import express from "express";
 import { fileURLToPath } from "url";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { INITIAL_ARTISTS, INITIAL_ARTICLES, Artist, Article } from "./src/data/artistsData";
@@ -382,6 +383,127 @@ app.post("/api/artists/import-csv", async (req, res) => {
 // News API
 app.get("/api/news", (req, res) => {
   res.json(articles);
+});
+
+// Verification & Monetization Settings Store
+interface VerificationSettings {
+  googleVerificationFile?: {
+    filename: string;
+    content: string;
+    uploadedAt: string;
+  };
+  monetagVerification?: {
+    swJsContent?: string;
+    metaTag?: string;
+    customCode?: string;
+    uploadedAt?: string;
+  };
+  monetagAds?: {
+    headerScript?: string;
+    headerEnabled?: boolean;
+    headerZoneId?: string;
+    homepageTopScript?: string;
+    homepageTopEnabled?: boolean;
+    homepageTopZoneId?: string;
+    articlePageScript?: string;
+    articlePageEnabled?: boolean;
+    articlePageZoneId?: string;
+    sidebarScript?: string;
+    sidebarEnabled?: boolean;
+    sidebarZoneId?: string;
+    footerScript?: string;
+    footerEnabled?: boolean;
+    footerZoneId?: string;
+  };
+}
+
+let verificationSettings: VerificationSettings = {
+  monetagAds: {
+    headerEnabled: false,
+    homepageTopEnabled: false,
+    articlePageEnabled: false,
+    sidebarEnabled: false,
+    footerEnabled: false,
+  }
+};
+
+// Serve public static files directly (Google verification HTML, sw.js, etc.)
+app.use(express.static(path.join(__dirname, "public")));
+
+// Dynamic fallback for Google verification HTML and Monetag sw.js
+app.get("/:filename(google[a-zA-Z0-9_-]+\\.html|sw\\.js)", (req, res, next) => {
+  const filename = req.params.filename;
+  if (filename.startsWith("google") && verificationSettings.googleVerificationFile?.filename === filename) {
+    res.setHeader("Content-Type", "text/html");
+    return res.send(verificationSettings.googleVerificationFile.content);
+  }
+  if (filename === "sw.js" && verificationSettings.monetagVerification?.swJsContent) {
+    res.setHeader("Content-Type", "application/javascript");
+    return res.send(verificationSettings.monetagVerification.swJsContent);
+  }
+  next();
+});
+
+// Get verification and monetization settings
+app.get("/api/verification/settings", (req, res) => {
+  res.json(verificationSettings);
+});
+
+// Save verification and monetization settings
+app.post("/api/verification/settings", (req, res) => {
+  verificationSettings = {
+    ...verificationSettings,
+    ...req.body,
+    monetagAds: {
+      ...verificationSettings.monetagAds,
+      ...(req.body.monetagAds || {})
+    }
+  };
+  res.json({ success: true, settings: verificationSettings });
+});
+
+// Upload verification file (Google HTML or Monetag sw.js)
+app.post("/api/verification/upload-file", (req, res) => {
+  try {
+    const { filename, content, type } = req.body;
+    if (!filename || content === undefined) {
+      return res.status(400).json({ error: "Filename and content required" });
+    }
+
+    const publicDir = path.join(__dirname, "public");
+    if (!fs.existsSync(publicDir)) {
+      fs.mkdirSync(publicDir, { recursive: true });
+    }
+    fs.writeFileSync(path.join(publicDir, filename), content, "utf8");
+
+    const distDir = path.join(__dirname, "dist");
+    if (fs.existsSync(distDir)) {
+      fs.writeFileSync(path.join(distDir, filename), content, "utf8");
+    }
+
+    if (type === "google") {
+      verificationSettings.googleVerificationFile = {
+        filename,
+        content,
+        uploadedAt: new Date().toISOString()
+      };
+    } else if (type === "monetag" || filename === "sw.js") {
+      verificationSettings.monetagVerification = {
+        ...verificationSettings.monetagVerification,
+        swJsContent: content,
+        uploadedAt: new Date().toISOString()
+      };
+    }
+
+    res.json({
+      success: true,
+      filename,
+      publicUrl: `/${filename}`,
+      message: `File ${filename} successfully written to public publishing directory.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Vite middleware integration

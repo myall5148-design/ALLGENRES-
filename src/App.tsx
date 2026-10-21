@@ -37,7 +37,14 @@ import {
   Sliders,
   Link as LinkIcon,
   Upload,
-  FileText
+  FileText,
+  Download,
+  Code,
+  CheckCircle2,
+  AlertCircle,
+  Copy,
+  DollarSign,
+  Layers
 } from "lucide-react";
 
 import { auth, db, googleProvider } from "./firebase";
@@ -69,6 +76,151 @@ const DEFAULT_POPUP_SETTINGS: PopupSettings = {
   showFrequency: "every_visit",
   isCloseable: true,
   buttonBehavior: "open_monetag_and_continue"
+};
+
+export interface VerificationSettings {
+  googleVerificationFile?: {
+    filename: string;
+    content: string;
+    uploadedAt: string;
+  };
+  monetagVerification?: {
+    metaContent?: string;
+    customCode?: string;
+    swJsContent?: string;
+    uploadedAt?: string;
+  };
+  monetagAds?: {
+    headerScript?: string;
+    headerEnabled?: boolean;
+    headerZoneId?: string;
+    homepageTopScript?: string;
+    homepageTopEnabled?: boolean;
+    homepageTopZoneId?: string;
+    articlePageScript?: string;
+    articlePageEnabled?: boolean;
+    articlePageZoneId?: string;
+    sidebarScript?: string;
+    sidebarEnabled?: boolean;
+    sidebarZoneId?: string;
+    footerScript?: string;
+    footerEnabled?: boolean;
+    footerZoneId?: string;
+  };
+}
+
+const DEFAULT_VERIFICATION_SETTINGS: VerificationSettings = {
+  monetagVerification: {
+    metaContent: "",
+    customCode: "",
+    swJsContent: `// Monetag Service Worker (sw.js)
+self.addEventListener('push', function(e) {
+  var data = {};
+  if (e.data) {
+    try { data = e.data.json(); } catch(err) { data = { title: e.data.text() }; }
+  }
+  var title = data.title || 'ALLGENRES Soundpulse';
+  var message = data.message || 'Latest music updates and artists releases';
+  var icon = data.icon || '/favicon.ico';
+  var tag = data.tag || 'allgenres-notification';
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body: message,
+      icon: icon,
+      tag: tag
+    })
+  );
+});
+
+self.addEventListener('notificationclick', function(e) {
+  e.notification.close();
+  e.waitUntil(
+    clients.matchAll({ type: 'window' }).then(function(clientList) {
+      if (clientList.length > 0) {
+        return clientList[0].focus();
+      }
+      return clients.openWindow('/');
+    })
+  );
+});`,
+  },
+  monetagAds: {
+    headerEnabled: false,
+    headerZoneId: "",
+    headerScript: "",
+    homepageTopEnabled: false,
+    homepageTopZoneId: "",
+    homepageTopScript: "",
+    articlePageEnabled: false,
+    articlePageZoneId: "",
+    articlePageScript: "",
+    sidebarEnabled: false,
+    sidebarZoneId: "",
+    sidebarScript: "",
+    footerEnabled: false,
+    footerZoneId: "",
+    footerScript: "",
+  }
+};
+
+const AdPlacementSlot = ({
+  title,
+  enabled,
+  zoneId,
+  script,
+  previewMode = false
+}: {
+  title: string;
+  placement: string;
+  enabled?: boolean;
+  zoneId?: string;
+  script?: string;
+  previewMode?: boolean;
+}) => {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!containerRef.current) return;
+    if (!enabled && !previewMode) return;
+
+    if (script && script.trim()) {
+      containerRef.current.innerHTML = "";
+      const div = document.createElement("div");
+      div.innerHTML = script;
+
+      const scripts = div.querySelectorAll("script");
+      scripts.forEach(oldScript => {
+        const newScript = document.createElement("script");
+        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+        newScript.appendChild(document.createTextNode(oldScript.innerHTML));
+        oldScript.parentNode?.replaceChild(newScript, oldScript);
+      });
+      containerRef.current.appendChild(div);
+    }
+  }, [enabled, script, previewMode]);
+
+  if (!enabled && !previewMode) return null;
+
+  return (
+    <div className="w-full my-4 flex flex-col items-center justify-center">
+      <div className="w-full max-w-5xl bg-slate-900/60 border border-dashed border-rose-500/25 rounded-2xl p-4 text-center">
+        <div className="flex items-center justify-between text-[11px] text-slate-500 mb-2 px-2">
+          <span className="uppercase tracking-wider font-semibold text-rose-400/90 flex items-center gap-1.5">
+            <DollarSign className="w-3.5 h-3.5 text-rose-500" />
+            <span>Monetag Ad &bull; {title}</span>
+          </span>
+          {zoneId && <span className="font-mono text-[10px] bg-slate-800 px-2 py-0.5 rounded text-rose-300">Zone: {zoneId}</span>}
+        </div>
+        <div ref={containerRef} className="min-h-[50px] flex items-center justify-center overflow-hidden">
+          {(!script || !script.trim()) && (
+            <div className="py-3 text-xs text-slate-400 font-medium">
+              [ Monetag Ad Slot: {title} {zoneId ? `(Zone: ${zoneId})` : ""} &mdash; Active ]
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const ADMIN_EMAIL = "morelet119@gmail.com";
@@ -108,12 +260,21 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
 
   // Admin sub-tabs & tools
-  const [adminSubTab, setAdminSubTab] = useState<"overview" | "popup" | "monetag" | "artists" | "csv" | "aigen">("artists");
+  const [adminSubTab, setAdminSubTab] = useState<"overview" | "popup" | "monetag" | "artists" | "csv" | "aigen" | "verification">("artists");
   const [csvInput, setCsvInput] = useState<string>("");
   const [aiGenName, setAiGenName] = useState<string>("");
   const [aiGenResult, setAiGenResult] = useState<Artist | null>(null);
   const [aiGenLoading, setAiGenLoading] = useState<boolean>(false);
   const [aiGenMessage, setAiGenMessage] = useState<string>("");
+
+  // Verification & Monetization state
+  const [verificationSettings, setVerificationSettings] = useState<VerificationSettings>(DEFAULT_VERIFICATION_SETTINGS);
+  const [savingVerification, setSavingVerification] = useState<boolean>(false);
+  const [verificationMessage, setVerificationMessage] = useState<string>("");
+  const [googleFileInput, setGoogleFileInput] = useState<{ filename: string; content: string }>({ filename: "", content: "" });
+  const [monetagSwInput, setMonetagSwInput] = useState<string>("");
+  const [verificationCheckStatus, setVerificationCheckStatus] = useState<Record<string, "idle" | "testing" | "success" | "failed">>({});
+  const [adsPreviewMode, setAdsPreviewMode] = useState<boolean>(false);
 
   const fetchData = async () => {
     try {
@@ -130,7 +291,7 @@ export default function App() {
           }
         }
       } catch (e) {
-        // Fallback for static hosting (Netlify)
+        // Fallback for static hosting (GitHub Pages / Netlify)
       }
 
       try {
@@ -148,11 +309,45 @@ export default function App() {
       setArtists(loadedArtists);
       setArticles(loadedArticles);
 
-      const popupDocRef = doc(db, "settings", "popup");
-      const popupSnap = await getDoc(popupDocRef);
-      if (popupSnap.exists()) {
-        const data = popupSnap.data() as PopupSettings;
-        setPopupSettings({ ...DEFAULT_POPUP_SETTINGS, ...data });
+      // Load welcome popup settings
+      try {
+        const popupDocRef = doc(db, "settings", "popup");
+        const popupSnap = await getDoc(popupDocRef);
+        if (popupSnap.exists()) {
+          const data = popupSnap.data() as PopupSettings;
+          setPopupSettings({ ...DEFAULT_POPUP_SETTINGS, ...data });
+        }
+      } catch (e) {}
+
+      // Load verification & monetization settings
+      try {
+        const verDocRef = doc(db, "settings", "verification");
+        const verSnap = await getDoc(verDocRef);
+        if (verSnap.exists()) {
+          const verData = verSnap.data() as VerificationSettings;
+          setVerificationSettings(prev => ({
+            ...DEFAULT_VERIFICATION_SETTINGS,
+            ...verData,
+            monetagAds: {
+              ...DEFAULT_VERIFICATION_SETTINGS.monetagAds,
+              ...(verData.monetagAds || {})
+            }
+          }));
+        } else {
+          const res = await fetch("/api/verification/settings");
+          if (res.ok) {
+            const data = await res.json();
+            setVerificationSettings(prev => ({ ...DEFAULT_VERIFICATION_SETTINGS, ...data }));
+          }
+        }
+      } catch (e) {
+        try {
+          const res = await fetch("/api/verification/settings");
+          if (res.ok) {
+            const data = await res.json();
+            setVerificationSettings(prev => ({ ...DEFAULT_VERIFICATION_SETTINGS, ...data }));
+          }
+        } catch (err) {}
       }
     } catch (err) {
       console.error("Failed to fetch data:", err);
@@ -189,6 +384,178 @@ export default function App() {
       }
     }
   }, [popupSettings.enabled, popupSettings.showFrequency]);
+
+  // Dynamic Monetag Meta Tag & Custom Head Code Injection
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    // 1. Manage Monetag verification meta tag
+    const metaContent = verificationSettings.monetagVerification?.metaContent?.trim();
+    let existingMeta = document.querySelector('meta[name="monetag"]');
+
+    if (metaContent) {
+      let token = metaContent;
+      const match = metaContent.match(/content=["']([^"']+)["']/i);
+      if (match && match[1]) {
+        token = match[1];
+      } else {
+        token = token.replace(/<[^>]+>/g, "").trim();
+      }
+
+      if (!existingMeta) {
+        existingMeta = document.createElement("meta");
+        existingMeta.setAttribute("name", "monetag");
+        document.head.appendChild(existingMeta);
+      }
+      existingMeta.setAttribute("content", token);
+    } else if (existingMeta) {
+      existingMeta.remove();
+    }
+
+    // 2. Manage Monetag custom head code
+    const customCode = verificationSettings.monetagVerification?.customCode?.trim();
+    const customScriptId = "monetag-custom-head-tag";
+    let existingCustom = document.getElementById(customScriptId);
+    if (customCode) {
+      if (!existingCustom) {
+        existingCustom = document.createElement("div");
+        existingCustom.id = customScriptId;
+        document.head.appendChild(existingCustom);
+      }
+      existingCustom.innerHTML = customCode;
+    } else if (existingCustom) {
+      existingCustom.remove();
+    }
+  }, [verificationSettings.monetagVerification]);
+
+  const handleSaveVerificationSettings = async (customSettings?: VerificationSettings) => {
+    const toSave = customSettings || verificationSettings;
+    setSavingVerification(true);
+    setVerificationMessage("");
+    try {
+      // 1. Save to Firebase Firestore
+      try {
+        const verDocRef = doc(db, "settings", "verification");
+        await setDoc(verDocRef, toSave, { merge: true });
+      } catch (firestoreErr) {
+        console.warn("Firestore save fallback to API:", firestoreErr);
+      }
+
+      // 2. Save to Express server endpoint
+      try {
+        await fetch("/api/verification/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(toSave)
+        });
+      } catch (apiErr) {
+        console.warn("API save warning:", apiErr);
+      }
+
+      setVerificationSettings(toSave);
+      setVerificationMessage("Verification & Monetization settings successfully saved!");
+      setTimeout(() => setVerificationMessage(""), 5000);
+    } catch (err: any) {
+      setVerificationMessage("Error saving settings: " + err.message);
+    } finally {
+      setSavingVerification(false);
+    }
+  };
+
+  const handleUploadGoogleFile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleFileInput.filename || !googleFileInput.content) {
+      return alert("Please specify both the Google verification filename (e.g. google1234567890abcdef.html) and file content.");
+    }
+    try {
+      setSavingVerification(true);
+      await fetch("/api/verification/upload-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: googleFileInput.filename,
+          content: googleFileInput.content,
+          type: "google"
+        })
+      });
+
+      const updated: VerificationSettings = {
+        ...verificationSettings,
+        googleVerificationFile: {
+          filename: googleFileInput.filename,
+          content: googleFileInput.content,
+          uploadedAt: new Date().toISOString()
+        }
+      };
+
+      await handleSaveVerificationSettings(updated);
+      alert(`Google Verification file "${googleFileInput.filename}" saved and ready for verification!`);
+      setGoogleFileInput({ filename: "", content: "" });
+    } catch (err: any) {
+      alert("Error uploading Google file: " + err.message);
+    } finally {
+      setSavingVerification(false);
+    }
+  };
+
+  const handleUploadMonetagSw = async (contentToSave?: string) => {
+    const content = contentToSave || monetagSwInput || verificationSettings.monetagVerification?.swJsContent;
+    if (!content) return alert("Service Worker content is empty.");
+    try {
+      setSavingVerification(true);
+      await fetch("/api/verification/upload-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: "sw.js",
+          content,
+          type: "monetag"
+        })
+      });
+
+      const updated: VerificationSettings = {
+        ...verificationSettings,
+        monetagVerification: {
+          ...verificationSettings.monetagVerification,
+          swJsContent: content,
+          uploadedAt: new Date().toISOString()
+        }
+      };
+
+      await handleSaveVerificationSettings(updated);
+      alert("Monetag Service Worker (sw.js) saved successfully!");
+    } catch (err: any) {
+      alert("Error saving sw.js: " + err.message);
+    } finally {
+      setSavingVerification(false);
+    }
+  };
+
+  const triggerDownload = (filename: string, content: string, mimeType = "text/plain") => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const testUrlReachability = async (key: string, url: string) => {
+    setVerificationCheckStatus(prev => ({ ...prev, [key]: "testing" }));
+    try {
+      const res = await fetch(url, { method: "HEAD", cache: "no-cache" });
+      if (res.ok) {
+        setVerificationCheckStatus(prev => ({ ...prev, [key]: "success" }));
+      } else {
+        setVerificationCheckStatus(prev => ({ ...prev, [key]: "failed" }));
+      }
+    } catch (err) {
+      setVerificationCheckStatus(prev => ({ ...prev, [key]: "failed" }));
+    }
+  };
 
   const handleGoogleLogin = async () => {
     try {
@@ -567,8 +934,30 @@ export default function App() {
         )}
       </header>
 
+      {/* Header Monetag Ad Placement */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
+        <AdPlacementSlot
+          title="Header Placement"
+          placement="header"
+          enabled={verificationSettings.monetagAds?.headerEnabled}
+          zoneId={verificationSettings.monetagAds?.headerZoneId}
+          script={verificationSettings.monetagAds?.headerScript}
+          previewMode={adsPreviewMode}
+        />
+      </div>
+
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
+
+        {/* Homepage Top Monetag Ad Placement */}
+        <AdPlacementSlot
+          title="Homepage Top Placement"
+          placement="homepageTop"
+          enabled={verificationSettings.monetagAds?.homepageTopEnabled}
+          zoneId={verificationSettings.monetagAds?.homepageTopZoneId}
+          script={verificationSettings.monetagAds?.homepageTopScript}
+          previewMode={adsPreviewMode}
+        />
 
         {/* ARTIST DIRECTORY VIEW (MAIN) */}
         {activeTab === "artists" && (
@@ -632,6 +1021,16 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* Sidebar / In-Feed Monetag Ad Placement */}
+            <AdPlacementSlot
+              title="Sidebar & In-Feed Placement"
+              placement="sidebar"
+              enabled={verificationSettings.monetagAds?.sidebarEnabled}
+              zoneId={verificationSettings.monetagAds?.sidebarZoneId}
+              script={verificationSettings.monetagAds?.sidebarScript}
+              previewMode={adsPreviewMode}
+            />
 
             {/* Artists Grid with Pagination */}
             <div className="space-y-6">
@@ -781,6 +1180,7 @@ export default function App() {
                     { id: "artists", label: `Manage Artists (${artists.length})` },
                     { id: "aigen", label: "AI Bio Generator" },
                     { id: "csv", label: "CSV Bulk Import" },
+                    { id: "verification", label: "Website Verification & Monetization" },
                     { id: "popup", label: "Welcome Pop-Up Settings" },
                     { id: "monetag", label: "Monetag Smart Link" }
                   ].map(tab => (
@@ -1079,6 +1479,551 @@ export default function App() {
                     <button onClick={handleSavePopupSettings} className="w-full py-3 rounded-xl bg-rose-600 text-white font-bold text-xs">Save Smart Link</button>
                   </div>
                 )}
+
+                {/* WEBSITE VERIFICATION & MONETIZATION CENTER */}
+                {adminSubTab === "verification" && (
+                  <div className="space-y-8 max-w-4xl mx-auto">
+                    {/* Header Banner */}
+                    <div className="bg-gradient-to-r from-rose-950/60 via-purple-950/40 to-slate-900 border border-rose-500/30 p-6 sm:p-8 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center space-x-2 text-rose-400 text-xs font-bold uppercase tracking-wider mb-1">
+                          <ShieldCheck className="w-4 h-4" />
+                          <span>SEO & Revenue Infrastructure</span>
+                        </div>
+                        <h3 className="text-2xl font-extrabold text-white">Website Verification & Monetization</h3>
+                        <p className="text-slate-400 text-xs mt-1">Manage Google Search Console verification, Monetag service worker (sw.js), head meta tags, and 5 ad placement zones.</p>
+                      </div>
+
+                      <div className="flex items-center space-x-3 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setAdsPreviewMode(!adsPreviewMode)}
+                          className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all border ${
+                            adsPreviewMode
+                              ? "bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-lg shadow-amber-500/10"
+                              : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700"
+                          }`}
+                        >
+                          <Eye className="w-4 h-4" />
+                          <span>{adsPreviewMode ? "Ad Preview: Active" : "Preview Ad Placements"}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {verificationMessage && (
+                      <div className="p-4 bg-emerald-500/20 border border-emerald-500/30 rounded-2xl text-emerald-300 text-xs font-semibold flex items-center space-x-2 animate-fadeIn">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                        <span>{verificationMessage}</span>
+                      </div>
+                    )}
+
+                    {/* SECTION 1: GOOGLE SEARCH CONSOLE */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
+                      <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="w-7 h-7 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center font-bold text-xs">1</span>
+                            <h4 className="text-lg font-bold text-white">Google Search Console Verification</h4>
+                          </div>
+                          <p className="text-slate-400 text-xs">
+                            Upload the HTML verification file provided by Google (e.g. <code className="text-rose-300 bg-slate-950 px-1 py-0.5 rounded">google1234567890abcdef.html</code>) to verify ownership and rank on Google Search.
+                          </p>
+                        </div>
+                        {verificationSettings.googleVerificationFile?.filename ? (
+                          <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[11px] font-bold border border-emerald-500/30 flex items-center space-x-1 shrink-0">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>File Active</span>
+                          </span>
+                        ) : (
+                          <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-[11px] font-bold border border-amber-500/30 shrink-0">
+                            Verification Pending
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Current File Display */}
+                      {verificationSettings.googleVerificationFile?.filename && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <FileText className="w-4 h-4 text-rose-400" />
+                                <span className="font-mono text-sm font-bold text-white">{verificationSettings.googleVerificationFile.filename}</span>
+                              </div>
+                              <span className="text-[11px] text-slate-500 block mt-0.5">
+                                Uploaded on: {new Date(verificationSettings.googleVerificationFile.uploadedAt).toLocaleString()}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* Direct Download Button */}
+                              <button
+                                type="button"
+                                onClick={() => triggerDownload(
+                                  verificationSettings.googleVerificationFile!.filename,
+                                  verificationSettings.googleVerificationFile!.content,
+                                  "text/html"
+                                )}
+                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center space-x-1.5 border border-slate-700"
+                              >
+                                <Download className="w-3.5 h-3.5 text-rose-400" />
+                                <span>Download File</span>
+                              </button>
+
+                              {/* Test Reachability Button */}
+                              <button
+                                type="button"
+                                onClick={() => testUrlReachability(
+                                  "google",
+                                  `/${verificationSettings.googleVerificationFile!.filename}`
+                                )}
+                                className="px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 text-xs font-semibold flex items-center space-x-1.5 border border-rose-500/30"
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 ${verificationCheckStatus["google"] === "testing" ? "animate-spin" : ""}`} />
+                                <span>Test Verification URL</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Content Snippet */}
+                          <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800/80 text-[11px] font-mono text-slate-300 break-all">
+                            {verificationSettings.googleVerificationFile.content}
+                          </div>
+
+                          {/* Status result */}
+                          {verificationCheckStatus["google"] && (
+                            <div className="text-xs">
+                              {verificationCheckStatus["google"] === "testing" && (
+                                <span className="text-amber-400">Verifying live response from server...</span>
+                              )}
+                              {verificationCheckStatus["google"] === "success" && (
+                                <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Server responded 200 OK. Verification file is accessible at root!</span>
+                                </span>
+                              )}
+                              {verificationCheckStatus["google"] === "failed" && (
+                                <span className="text-rose-400 font-semibold">
+                                  Reachable via GitHub Pages path once committed to repository public folder.
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="text-[11px] text-slate-400 space-y-1 pt-1 border-t border-slate-800/60">
+                            <p><strong>GitHub Pages Live Verification URL:</strong></p>
+                            <a
+                              href={`https://myall5148-design.github.io/ALLGENRES-/${verificationSettings.googleVerificationFile.filename}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-rose-400 hover:underline flex items-center gap-1 font-mono"
+                            >
+                              <span>https://myall5148-design.github.io/ALLGENRES-/{verificationSettings.googleVerificationFile.filename}</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Upload / Input Form */}
+                      <form onSubmit={handleUploadGoogleFile} className="space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">Upload File from Computer</label>
+                            <input
+                              type="file"
+                              accept=".html"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => {
+                                    setGoogleFileInput({
+                                      filename: file.name,
+                                      content: ev.target?.result as string || ""
+                                    });
+                                  };
+                                  reader.readAsText(file);
+                                }
+                              }}
+                              className="w-full text-xs text-slate-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-slate-800 file:text-rose-400 hover:file:bg-slate-700 cursor-pointer bg-slate-950 border border-slate-800 rounded-xl p-2"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">Or Enter Exact Filename</label>
+                            <input
+                              type="text"
+                              value={googleFileInput.filename}
+                              onChange={(e) => setGoogleFileInput({ ...googleFileInput, filename: e.target.value })}
+                              placeholder="google1234567890abcdef.html"
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-rose-500 font-mono"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">File Content</label>
+                          <textarea
+                            rows={3}
+                            value={googleFileInput.content}
+                            onChange={(e) => setGoogleFileInput({ ...googleFileInput, content: e.target.value })}
+                            placeholder="google-site-verification: google1234567890abcdef.html"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-rose-500 font-mono"
+                          />
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-3">
+                          <button
+                            type="submit"
+                            disabled={savingVerification}
+                            className="px-6 py-3 rounded-xl bg-gradient-to-r from-rose-500 to-purple-600 text-white font-bold text-xs shadow-lg disabled:opacity-50 flex items-center justify-center space-x-2"
+                          >
+                            <Upload className="w-4 h-4" />
+                            <span>{savingVerification ? "Saving..." : "Save & Serve Verification File"}</span>
+                          </button>
+                        </div>
+                      </form>
+
+                      {/* GitHub Pages Guidance Card */}
+                      <div className="bg-slate-950 border border-slate-800/80 p-4 rounded-2xl text-[11px] text-slate-400 space-y-1.5">
+                        <p className="font-bold text-slate-200 flex items-center gap-1.5">
+                          <span>💡</span>
+                          <span>GitHub Pages Deployment Instructions</span>
+                        </p>
+                        <p>1. Save your verification file using the form above (this automatically writes it to <code className="text-rose-300">public/</code> for local and build environments).</p>
+                        <p>2. Click <strong>Download File</strong> to save the exact HTML file to your computer.</p>
+                        <p>3. In your GitHub repository <code className="text-purple-300">myall5148-design/ALLGENRES-</code>, place this file in the <code className="text-rose-300">public/</code> folder. When GitHub Pages builds, the file is served automatically at root!</p>
+                      </div>
+                    </div>
+
+                    {/* SECTION 2: MONETAG WEBSITE VERIFICATION */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
+                      <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="w-7 h-7 rounded-lg bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center font-bold text-xs">2</span>
+                            <h4 className="text-lg font-bold text-white">Monetag Website Verification</h4>
+                          </div>
+                          <p className="text-slate-400 text-xs">
+                            Verify your domain on Monetag by deploying the <code className="text-rose-300 bg-slate-950 px-1 py-0.5 rounded">sw.js</code> Service Worker file and injecting the verification meta tag.
+                          </p>
+                        </div>
+                        <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[11px] font-bold border border-emerald-500/30 flex items-center space-x-1 shrink-0">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>sw.js Ready</span>
+                        </span>
+                      </div>
+
+                      {/* Sub-item A: Service Worker (sw.js) */}
+                      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <Code className="w-4 h-4 text-purple-400" />
+                              <span className="font-mono text-sm font-bold text-white">Service Worker File (sw.js)</span>
+                            </div>
+                            <span className="text-[11px] text-slate-500">
+                              Served directly from root <code className="text-rose-300">/sw.js</code> for push subscriber monetization.
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => triggerDownload(
+                                "sw.js",
+                                monetagSwInput || verificationSettings.monetagVerification?.swJsContent || DEFAULT_VERIFICATION_SETTINGS.monetagVerification!.swJsContent!,
+                                "application/javascript"
+                              )}
+                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center space-x-1.5 border border-slate-700"
+                            >
+                              <Download className="w-3.5 h-3.5 text-purple-400" />
+                              <span>Download sw.js</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => testUrlReachability("swjs", "/sw.js")}
+                              className="px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 text-xs font-semibold flex items-center space-x-1.5 border border-purple-500/30"
+                            >
+                              <RefreshCw className={`w-3.5 h-3.5 ${verificationCheckStatus["swjs"] === "testing" ? "animate-spin" : ""}`} />
+                              <span>Test sw.js URL</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">sw.js Content (Editable)</label>
+                          <textarea
+                            rows={6}
+                            value={monetagSwInput || verificationSettings.monetagVerification?.swJsContent || DEFAULT_VERIFICATION_SETTINGS.monetagVerification?.swJsContent}
+                            onChange={(e) => setMonetagSwInput(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 font-mono focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => handleUploadMonetagSw(monetagSwInput)}
+                            className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs"
+                          >
+                            Save & Deploy sw.js
+                          </button>
+                          <a
+                            href="https://myall5148-design.github.io/ALLGENRES-/sw.js"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-purple-400 hover:underline text-xs flex items-center gap-1"
+                          >
+                            <span>Live GitHub Pages URL</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+
+                      {/* Sub-item B: Meta Tag & Custom Code */}
+                      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h5 className="font-bold text-white text-sm">Monetag Verification Meta Tag</h5>
+                          {verificationSettings.monetagVerification?.metaContent ? (
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30">
+                              Injected in &lt;head&gt; (Active)
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-bold">
+                              No Meta Tag Configured
+                            </span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">
+                            Monetag Meta Tag or Verification Code
+                          </label>
+                          <input
+                            type="text"
+                            placeholder='e.g. <meta name="monetag" content="xxxx" /> or xxxx'
+                            value={verificationSettings.monetagVerification?.metaContent || ""}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setVerificationSettings({
+                                ...verificationSettings,
+                                monetagVerification: {
+                                  ...verificationSettings.monetagVerification,
+                                  metaContent: val
+                                }
+                              });
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs text-white font-mono focus:outline-none focus:border-rose-500"
+                          />
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            Paste the full tag or just the verification string. It will automatically be rendered in <code className="text-rose-400">&lt;head&gt;</code> of ALLGENRES.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">
+                            Additional Custom Head Scripts (Optional)
+                          </label>
+                          <textarea
+                            rows={3}
+                            placeholder='<script src="..."></script>'
+                            value={verificationSettings.monetagVerification?.customCode || ""}
+                            onChange={(e) => {
+                              setVerificationSettings({
+                                ...verificationSettings,
+                                monetagVerification: {
+                                  ...verificationSettings.monetagVerification,
+                                  customCode: e.target.value
+                                }
+                              });
+                            }}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-white font-mono focus:outline-none focus:border-rose-500"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSaveVerificationSettings()}
+                          className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs"
+                        >
+                          Save Monetag Verification
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* SECTION 3: MONETAG ADVERTISING CODE MANAGER */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
+                      <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="w-7 h-7 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs">3</span>
+                            <h4 className="text-lg font-bold text-white">Monetag Advertising Code Manager</h4>
+                          </div>
+                          <p className="text-slate-400 text-xs">
+                            Manage and activate Monetag ad scripts (Banners, Native Ads, Vignette, In-Page Push, Multi-Tag) across 5 standard layout slots.
+                          </p>
+                        </div>
+                        <span className="px-3 py-1 rounded-full bg-rose-500/20 text-rose-400 text-[11px] font-bold border border-rose-500/30 shrink-0">
+                          5 Placements Available
+                        </span>
+                      </div>
+
+                      <div className="space-y-4">
+                        {[
+                          {
+                            key: "header",
+                            title: "Placement 1: Header Ad Slot",
+                            desc: "Displays right below the top navigation across all pages.",
+                            enabledKey: "headerEnabled" as const,
+                            zoneKey: "headerZoneId" as const,
+                            scriptKey: "headerScript" as const,
+                          },
+                          {
+                            key: "homepageTop",
+                            title: "Placement 2: Homepage Top Ad Slot",
+                            desc: "High-visibility banner right above the Artist Directory & Search Bar.",
+                            enabledKey: "homepageTopEnabled" as const,
+                            zoneKey: "homepageTopZoneId" as const,
+                            scriptKey: "homepageTopScript" as const,
+                          },
+                          {
+                            key: "articlePage",
+                            title: "Placement 3: Article Page / Modal Placement",
+                            desc: "Displays inside music news stories and dedicated artist biographies.",
+                            enabledKey: "articlePageEnabled" as const,
+                            zoneKey: "articlePageZoneId" as const,
+                            scriptKey: "articlePageScript" as const,
+                          },
+                          {
+                            key: "sidebar",
+                            title: "Placement 4: Sidebar & In-Feed Placement",
+                            desc: "Appears in between country/genre filter controls and artist cards.",
+                            enabledKey: "sidebarEnabled" as const,
+                            zoneKey: "sidebarZoneId" as const,
+                            scriptKey: "sidebarScript" as const,
+                          },
+                          {
+                            key: "footer",
+                            title: "Placement 5: Footer Ad Slot",
+                            desc: "Placed directly above the main website footer across all pages.",
+                            enabledKey: "footerEnabled" as const,
+                            zoneKey: "footerZoneId" as const,
+                            scriptKey: "footerScript" as const,
+                          }
+                        ].map((slot) => {
+                          const isEnabled = !!verificationSettings.monetagAds?.[slot.enabledKey];
+                          const zoneId = verificationSettings.monetagAds?.[slot.zoneKey] || "";
+                          const script = verificationSettings.monetagAds?.[slot.scriptKey] || "";
+
+                          return (
+                            <div key={slot.key} className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-4">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div>
+                                  <h5 className="font-bold text-white text-sm flex items-center space-x-2">
+                                    <span>{slot.title}</span>
+                                    {isEnabled && (
+                                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                    )}
+                                  </h5>
+                                  <p className="text-[11px] text-slate-400">{slot.desc}</p>
+                                </div>
+
+                                <div className="flex items-center space-x-3">
+                                  <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={isEnabled}
+                                      onChange={(e) => {
+                                        setVerificationSettings({
+                                          ...verificationSettings,
+                                          monetagAds: {
+                                            ...verificationSettings.monetagAds,
+                                            [slot.enabledKey]: e.target.checked
+                                          }
+                                        });
+                                      }}
+                                      className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                                  </label>
+                                  <span className={`text-xs font-bold ${isEnabled ? "text-emerald-400" : "text-slate-500"}`}>
+                                    {isEnabled ? "Enabled" : "Disabled"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Zone ID (Optional)</label>
+                                  <input
+                                    type="text"
+                                    value={zoneId}
+                                    onChange={(e) => {
+                                      setVerificationSettings({
+                                        ...verificationSettings,
+                                        monetagAds: {
+                                          ...verificationSettings.monetagAds,
+                                          [slot.zoneKey]: e.target.value
+                                        }
+                                      });
+                                    }}
+                                    placeholder="e.g. 1234567"
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-rose-500"
+                                  />
+                                </div>
+
+                                <div className="sm:col-span-2">
+                                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                                    Monetag Script / Embed Code
+                                  </label>
+                                  <textarea
+                                    rows={2}
+                                    value={script}
+                                    onChange={(e) => {
+                                      setVerificationSettings({
+                                        ...verificationSettings,
+                                        monetagAds: {
+                                          ...verificationSettings.monetagAds,
+                                          [slot.scriptKey]: e.target.value
+                                        }
+                                      });
+                                    }}
+                                    placeholder='<script src="https://.../tag.js"></script>'
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none focus:border-rose-500"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveVerificationSettings()}
+                          disabled={savingVerification}
+                          className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-xl flex items-center justify-center space-x-2"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>{savingVerification ? "Saving..." : "Save All Monetization Settings"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setAdsPreviewMode(!adsPreviewMode)}
+                          className="text-xs text-slate-400 hover:text-white flex items-center space-x-1"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Toggle Ad Slot Preview on Live Layout</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1153,6 +2098,16 @@ export default function App() {
                 </div>
               )}
 
+              {/* Monetag Article / Biography Ad Slot */}
+              <AdPlacementSlot
+                title="Artist & Article Placement"
+                placement="articlePage"
+                enabled={verificationSettings.monetagAds?.articlePageEnabled}
+                zoneId={verificationSettings.monetagAds?.articlePageZoneId}
+                script={verificationSettings.monetagAds?.articlePageScript}
+                previewMode={adsPreviewMode}
+              />
+
               <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   <a href={selectedArtist.spotifyUrl} target="_blank" rel="noreferrer" className="px-4 py-2 rounded-xl bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white text-xs font-bold transition-all border border-emerald-500/30">
@@ -1173,6 +2128,70 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* DEDICATED ARTICLE MODAL */}
+      {selectedArticle && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl relative">
+            <button
+              onClick={() => setSelectedArticle(null)}
+              className="absolute top-4 right-4 z-10 p-2.5 rounded-full bg-slate-950/80 text-white hover:bg-rose-600 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <img src={selectedArticle.imageUrl} alt={selectedArticle.title} className="w-full h-64 object-cover rounded-t-3xl" />
+            
+            <div className="p-6 sm:p-8 space-y-4">
+              <span className="px-3 py-1 rounded-full bg-rose-500/20 text-rose-400 font-bold text-xs uppercase tracking-wider">
+                {selectedArticle.sourceName} &bull; {selectedArticle.publishedAt}
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-white">{selectedArticle.title}</h2>
+              <p className="text-slate-300 text-sm leading-relaxed">{selectedArticle.content || selectedArticle.excerpt}</p>
+
+              {/* Monetag Article Placement */}
+              <AdPlacementSlot
+                title="Article Page / Story Placement"
+                placement="articlePage"
+                enabled={verificationSettings.monetagAds?.articlePageEnabled}
+                zoneId={verificationSettings.monetagAds?.articlePageZoneId}
+                script={verificationSettings.monetagAds?.articlePageScript}
+                previewMode={adsPreviewMode}
+              />
+
+              <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+                <a
+                  href={selectedArticle.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-500 flex items-center space-x-1"
+                >
+                  <span>Read Original Story</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+                <button
+                  onClick={() => setSelectedArticle(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Footer Monetag Ad Placement */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
+        <AdPlacementSlot
+          title="Footer Placement (Above Main Footer)"
+          placement="footer"
+          enabled={verificationSettings.monetagAds?.footerEnabled}
+          zoneId={verificationSettings.monetagAds?.footerZoneId}
+          script={verificationSettings.monetagAds?.footerScript}
+          previewMode={adsPreviewMode}
+        />
+      </div>
 
       {/* Footer */}
       <footer className="bg-slate-900 border-t border-slate-800 py-12 mt-16">
